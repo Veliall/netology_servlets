@@ -1,13 +1,16 @@
 package ru.netology.servlet;
 
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import ru.netology.controller.PostController;
-import ru.netology.repository.PostRepository;
-import ru.netology.repository.PostRepositoryImpl;
-import ru.netology.service.PostService;
+import ru.netology.exception.NotFoundException;
+import ru.netology.handler.Handler;
 
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 
 public class MainServlet extends HttpServlet {
   public static final String GET = "GET";
@@ -15,45 +18,69 @@ public class MainServlet extends HttpServlet {
   public static final String DELETE = "DELETE";
   private PostController controller;
 
+  private final Map<String, Map<String, Handler>> handlers = new ConcurrentHashMap<>();
+  private static final String PATH = "/api/posts";
+  private static final String PATH_WITH_ID = "/api/posts/";
+
   @Override
   public void init() {
-    final var repository = new PostRepositoryImpl();
-    final var service = new PostService(repository);
-    controller = new PostController(service);
+    final AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext("ru.netology");
+    controller = context.getBean(PostController.class);
+
+    addHandler(GET, PATH, (path, req, resp) -> {
+      controller.all(resp);
+      resp.setStatus(HttpServletResponse.SC_OK);
+    });
+    addHandler(GET, PATH_WITH_ID, (path, req, resp) -> {
+      try {
+        controller.getById(parseId(path), resp);
+        resp.setStatus(HttpServletResponse.SC_OK);
+      } catch (NotFoundException e) {
+        resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+      }
+    });
+    addHandler(POST, PATH, (path, req, resp) -> {
+      controller.save(req.getReader(), resp);
+      resp.setStatus(HttpServletResponse.SC_OK);
+    });
+    addHandler(DELETE, PATH_WITH_ID, (path, req, resp) -> {
+      try {
+        controller.removeById(parseId(path), resp);
+        resp.setStatus(HttpServletResponse.SC_OK);
+      } catch (NotFoundException e) {
+        resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+      }
+    });
   }
 
   @Override
   protected void service(HttpServletRequest req, HttpServletResponse resp) {
-    // если деплоились в root context, то достаточно этого
     try {
-      final var path = req.getRequestURI();
-      final var method = req.getMethod();
-      // primitive routing
-      if (method.equals(GET) && path.equals("/api/posts")) {
-        controller.all(resp);
-        return;
+      final String method = req.getMethod();
+      String path = req.getRequestURI();
+
+      String pathToFindTheHandler = path;
+      if (path.startsWith(PATH_WITH_ID) && path.matches(PATH_WITH_ID + "\\d+")) {
+        pathToFindTheHandler = PATH_WITH_ID;
+      } else if (path.startsWith(PATH)) {
+        pathToFindTheHandler = PATH;
       }
-      if (method.equals(GET) && path.matches("/api/posts/\\d+")) {
-        // easy way
-        final var id = parseId(path);
-        controller.getById(id, resp);
-        return;
-      }
-      if (method.equals(POST) && path.equals("/api/posts")) {
-        controller.save(req.getReader(), resp);
-        return;
-      }
-      if (method.equals(DELETE) && path.matches("/api/posts/\\d+")) {
-        // easy way
-        final var id = parseId(path);
-        controller.removeById(id, resp);
-        return;
-      }
-      resp.setStatus(HttpServletResponse.SC_NOT_FOUND);
+
+      Handler handler = handlers.get(method).get(pathToFindTheHandler);
+      handler.handle(path, req, resp);
     } catch (Exception e) {
       e.printStackTrace();
       resp.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
     }
+  }
+
+  private void addHandler(String method, String path, Handler handler) {
+    Map<String, Handler> map = new ConcurrentHashMap<>();
+    if (handlers.containsKey(method)) {
+      map = handlers.get(method);
+    }
+    map.put(path, handler);
+    handlers.put(method, map);
   }
 
   private long parseId(String path) {
