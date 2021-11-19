@@ -19,8 +19,11 @@ public class PostRepositoryImpl implements PostRepository {
 
     @Override
     public Optional<Post> getById(long id) {
-        Post p = findPostById(id);
-        return p != null ? Optional.of(p) : Optional.empty();
+        if (posts.containsKey(id)) {
+            return Optional.of(posts.get(id));
+        } else {
+            return Optional.empty();
+        }
     }
 
     @Override
@@ -31,23 +34,14 @@ public class PostRepositoryImpl implements PostRepository {
             return post;
         }
 
-        Post p = findPostById(post.getId());
-        if (p != null) {
+        if (getById(post.getId()).isPresent()) {
             posts.put(post.getId(), post);
         }
-        return p;
+        return post;
     }
 
     @Override
     public boolean removeById(long id) {
-        return posts.remove(id, findPostById(id));
-    }
-
-    private Post findPostById(long id) {
-        if (posts.containsKey(id)) {
-            return posts.get(id);
-        } else {
-            throw new NotFoundException("post not found");
-        }
+        return posts.remove(id, getById(id).orElseThrow(NotFoundException::new));
     }
 }
